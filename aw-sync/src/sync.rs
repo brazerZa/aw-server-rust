@@ -18,11 +18,14 @@ use chrono::{DateTime, Utc};
 
 use aw_datastore::{Datastore, DatastoreError};
 use aw_models::{Bucket, Event};
+
+#[cfg(feature = "cli")]
 use clap::ValueEnum;
 
 use crate::accessmethod::AccessMethod;
 
-#[derive(PartialEq, Eq, Copy, Clone, ValueEnum)]
+#[derive(PartialEq, Eq, Copy, Clone)]
+#[cfg_attr(feature = "cli", derive(ValueEnum))]
 pub enum SyncMode {
     Push,
     Pull,
@@ -247,12 +250,18 @@ pub fn sync_datastores(
         .get_buckets()
         .unwrap()
         .iter_mut()
-        // If buckets vec isn't empty, filter out buckets not in the buckets vec
+        // Only filter buckets if specific bucket IDs are provided
         .filter(|tup| {
             let bucket = &tup.1;
             if let Some(buckets) = &sync_spec.buckets {
-                buckets.iter().any(|b_id| b_id == &bucket.id)
+                // If "*" is in the buckets list or no buckets specified, sync all buckets
+                if buckets.iter().any(|b_id| b_id == "*") || buckets.is_empty() {
+                    true
+                } else {
+                    buckets.iter().any(|b_id| b_id == &bucket.id)
+                }
             } else {
+                // By default, sync all buckets
                 true
             }
         })

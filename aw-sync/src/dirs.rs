@@ -5,15 +5,18 @@ use std::path::PathBuf;
 
 // TODO: This could be refactored to share logic with aw-server/src/dirs.rs
 // TODO: add proper config support
+#[cfg(not(target_os = "android"))]
 #[allow(dead_code)]
 pub fn get_config_dir() -> Result<PathBuf, Box<dyn Error>> {
-    let mut dir = appdirs::user_config_dir(Some("activitywatch"), None, false)
-        .map_err(|_| "Unable to read user config dir")?;
-    dir.push("aw-sync");
-    fs::create_dir_all(dir.clone())?;
+    let dir = dirs::config_dir()
+        .ok_or("Unable to read user config dir")?
+        .join("activitywatch")
+        .join("aw-sync");
+    fs::create_dir_all(&dir)?;
     Ok(dir)
 }
 
+#[cfg(not(target_os = "android"))]
 pub fn get_server_config_path(testing: bool) -> Result<PathBuf, ()> {
     let dir = aw_server::dirs::get_config_dir()?;
     Ok(dir.join(if testing {

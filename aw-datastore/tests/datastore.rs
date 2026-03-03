@@ -5,7 +5,7 @@ extern crate chrono;
 extern crate aw_datastore;
 extern crate serde_json;
 
-extern crate appdirs;
+extern crate dirs;
 
 #[cfg(test)]
 mod datastore_tests {
@@ -40,9 +40,11 @@ mod datastore_tests {
     pub fn get_cache_dir() -> Result<PathBuf, ()> {
         #[cfg(not(target_os = "android"))]
         {
-            let mut dir = appdirs::user_cache_dir(Some("activitywatch"), None)?;
-            dir.push("aw-server-rust");
-            fs::create_dir_all(dir.clone()).expect("Unable to create cache dir");
+            let dir = dirs::cache_dir()
+                .ok_or(())?
+                .join("activitywatch")
+                .join("aw-server-rust");
+            fs::create_dir_all(&dir).expect("Unable to create cache dir");
             Ok(dir)
         }
 
@@ -371,6 +373,41 @@ mod datastore_tests {
         assert_eq!(fetched_events[0].duration, e_diff_data.duration);
         assert_eq!(fetched_events[0].data, e_diff_data.data);
         assert_ne!(fetched_events[0].id, e2.id);
+    }
+
+    #[test]
+    fn test_event_heartbeat_consecutive_merges() {
+        // Regression test for https://github.com/ActivityWatch/aw-server-rust/issues/559
+        // After insert_heartbeat merges two events, the merged event stored in cache
+        // must retain the DB event ID so subsequent heartbeats can find it for
+        // replace_last_event. Without the ID, every other heartbeat would fail.
+        let ds = Datastore::new_in_memory(false);
+        let bucket = create_test_bucket(&ds);
+
+        let now = Utc::now();
+        let pulsetime = 10.0;
+
+        // Send 5 consecutive heartbeats with the same data, 1 second apart.
+        // They should all merge into a single event with increasing duration.
+        for i in 0..5 {
+            let e = Event {
+                id: None,
+                timestamp: now + Duration::seconds(i),
+                duration: Duration::seconds(0),
+                data: json_map! {"key": json!("value")},
+            };
+            ds.heartbeat(&bucket.id, e, pulsetime).unwrap();
+        }
+
+        let events = ds.get_events(&bucket.id, None, None, None).unwrap();
+        assert_eq!(
+            events.len(),
+            1,
+            "all heartbeats should merge into one event"
+        );
+        assert_eq!(events[0].timestamp, now);
+        assert_eq!(events[0].duration, Duration::seconds(4));
+        assert!(events[0].id.is_some(), "event should have a DB id");
     }
 
     #[test]

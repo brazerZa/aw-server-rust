@@ -41,8 +41,14 @@ pub mod android {
     use crate::config::AWConfig;
     use crate::endpoints;
     use crate::endpoints::ServerState;
+    use aw_client_rust::blocking::AwClient;
+    use aw_client_rust::classes::default_classes;
+    use aw_client_rust::classes::{CategoryId, CategorySpec};
+    use aw_client_rust::queries::{
+        build_android_canonical_events, AndroidQueryParams, QueryParamsBase,
+    };
     use aw_datastore::Datastore;
-    use aw_models::{Bucket, Event};
+    use aw_models::{Bucket, Event, TimeInterval};
 
     static mut DATASTORE: Option<Datastore> = None;
 
@@ -83,8 +89,8 @@ pub mod android {
     }
 
     unsafe fn jstring_to_string(env: &JNIEnv, string: JString) -> String {
-        let c_str = CStr::from_ptr(env.get_string(string).expect("invalid string").as_ptr());
-        String::from(c_str.to_str().unwrap())
+        let jstr = env.get_string(string).expect("Failed to get Java string");
+        jstr.into()
     }
 
     unsafe fn string_to_jstring(env: &JNIEnv, string: String) -> jstring {
@@ -242,5 +248,140 @@ pub mod android {
                 format!("Something went wrong when trying to get events: {:?}", e),
             ),
         }
+    }
+
+    #[no_mangle]
+    pub unsafe extern "C" fn Java_net_activitywatch_android_RustInterface_query(
+        env: JNIEnv,
+        _: JClass,
+        java_query: JString,
+        java_timeperiods: JString,
+    ) -> jstring {
+        let query_code = jstring_to_string(&env, java_query);
+        let timeperiods_str = jstring_to_string(&env, java_timeperiods);
+        let timeperiods: Vec<TimeInterval> = match serde_json::from_str(&timeperiods_str) {
+            Ok(json) => json,
+            Err(err) => return create_error_object(&env, err.to_string()),
+        };
+
+        let datastore = openDatastore();
+        let mut results = Vec::new();
+
+        for interval in &timeperiods {
+            let result = match aw_query::query(&query_code, interval, &datastore) {
+                Ok(data) => data,
+                Err(e) => {
+                    return create_error_object(
+                        &env,
+                        format!("Something went wrong when trying to query: {:?}", e),
+                    )
+                }
+            };
+            results.push(result);
+        }
+
+        string_to_jstring(&env, json!(results).to_string())
+    }
+
+    #[no_mangle]
+    pub unsafe extern "C" fn Java_net_activitywatch_android_RustInterface_androidQuery(
+        env: JNIEnv,
+        _: JClass,
+        java_timeperiods: JString,
+    ) -> jstring {
+        let timeperiods_str = jstring_to_string(&env, java_timeperiods);
+
+        let timeperiods: Vec<TimeInterval> = match serde_json::from_str(&timeperiods_str) {
+            Ok(json) => json,
+            Err(err) => return create_error_object(&env, err.to_string()),
+        };
+
+        // Hardcoded bucket ID for testing
+        let bid_android = "aw-watcher-android-test".to_string();
+
+        // Get classes from server settings via HTTP API
+        let classes = match AwClient::new("127.0.0.1", 5600, "aw-android-query") {
+            Ok(client) => {
+                match client.get_setting("classes") {
+                    Ok(classes_value) => {
+                        // Parse the server-side classes from JSON value
+                        match serde_json::from_value::<Vec<aw_models::Class>>(classes_value) {
+                            Ok(server_classes) => {
+                                if server_classes.is_empty() {
+                                    info!("Server classes list is empty, using default classes");
+                                    default_classes()
+                                } else {
+                                    // Convert from aw_models::Class to CategorySpec format
+                                    server_classes
+                                        .iter()
+                                        .map(|c| {
+                                            let category_id: CategoryId = c.name.clone();
+                                            let category_spec = CategorySpec {
+                                                spec_type: c.rule.rule_type.clone(),
+                                                regex: c.rule.regex.clone().unwrap_or_default(),
+                                                ignore_case: c.rule.ignore_case.unwrap_or(false),
+                                            };
+                                            (category_id, category_spec)
+                                        })
+                                        .collect()
+                                }
+                            }
+                            Err(e) => {
+                                warn!("Failed to parse server classes, using defaults: {:?}", e);
+                                default_classes()
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        info!("Failed to get server classes, using defaults: {:?}", e);
+                        default_classes()
+                    }
+                }
+            }
+            Err(e) => {
+                warn!(
+                    "Failed to create client for fetching classes, using defaults: {:?}",
+                    e
+                );
+                default_classes()
+            }
+        };
+
+        // Build canonical Android query
+        let params = AndroidQueryParams {
+            base: QueryParamsBase {
+                bid_browsers: Vec::new(),
+                classes,
+                filter_classes: Vec::new(),
+                filter_afk: true,
+                include_audible: true,
+            },
+            bid_android,
+        };
+        let query_code = format!(
+            r#"{}
+duration = sum_durations(events);
+cat_events = sort_by_duration(merge_events_by_keys(events, ["$category"]));
+RETURN = {{"events": events, "duration": duration, "cat_events": cat_events}};"#,
+            build_android_canonical_events(&params)
+        );
+
+        let datastore = openDatastore();
+        let mut results = Vec::new();
+
+        for interval in &timeperiods {
+            let result = match aw_query::query(&query_code, interval, &datastore) {
+                Ok(data) => data,
+                Err(e) => {
+                    return create_error_object(
+                        &env,
+                        format!("Something went wrong when trying to query: {:?}", e),
+                    )
+                }
+            };
+            results.push(result);
+        }
+
+        string_to_jstring(&env, json!(results).to_string())
     }
 }
