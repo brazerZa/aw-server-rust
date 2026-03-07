@@ -54,6 +54,10 @@ set-version:
 		VERSION_SEMVER=$(shell echo $(GITHUB_REF_NAME:v%=%) | sed -E 's/([0-9]+)\.([0-9]+)\.([0-9]+)-?(a|alpha|b|beta|rc)([0-9]+)/\1.\2.\3-\4.\5/; s/-b(.[0-9]+)/-beta\1/; s/-a(.[0-9+])/-alpha\1/'); \
 		echo "Building release $(GITHUB_REF_NAME) ($$VERSION_SEMVER), setting version in Cargo.toml"; \
 	    perl -i -pe "s/^version = .*/version = \"$$VERSION_SEMVER\"/" aw-server/Cargo.toml; \
+	elif [ -n "$$(git -C .. describe --tags --abbrev=0 2>/dev/null)" ]; then \
+		VERSION_SEMVER=$$(git -C .. describe --tags --abbrev=0 | sed 's/^v//'); \
+		echo "No GITHUB_REF_NAME, using latest git tag: $$VERSION_SEMVER"; \
+		perl -i -pe "s/^version = .*/version = \"$$VERSION_SEMVER\"/" aw-server/Cargo.toml; \
 	fi
 
 test-coverage-grcov:
