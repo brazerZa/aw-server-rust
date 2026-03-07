@@ -61,6 +61,62 @@ fn root_index(state: &State<ServerState>) -> Option<(ContentType, Vec<u8>)> {
     get_file("index.html".into(), state)
 }
 
+#[get("/api/")]
+fn api_index() -> (ContentType, String) {
+    (
+        ContentType::HTML,
+        r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Browser - Not Available</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 40px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 { color: #d16820; margin-bottom: 20px; }
+        p { color: #666; line-height: 1.6; }
+        .note {
+            background: #fff3cd;
+            padding: 15px;
+            border-radius: 4px;
+            border-left: 4px solid #d16820;
+        }
+        a { color: #d16820; }
+        code { background: #eee; padding: 2px 6px; border-radius: 3px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>API Browser</h1>
+        <div class="note">
+            <strong>Note:</strong> The API Browser is not available in aw-server-rust.
+            This feature is only available in the Python-based aw-server.
+        </div>
+        <p style="margin-top: 20px;">
+            You can still interact with the API using curl or other HTTP clients.
+            The API endpoints are available at <code>/api/0/</code>
+        </p>
+        <p>For example:<br>
+        <code>curl http://your-server:5600/api/0/buckets/</code></p>
+        <p><a href="/">← Back to Home</a></p>
+    </div>
+</body>
+</html>"#.to_string(),
+    )
+}
+
 #[get("/css/<file..>")]
 fn root_css(file: PathBuf, state: &State<ServerState>) -> Option<(ContentType, Vec<u8>)> {
     get_file(Path::new("css").join(file), state)
@@ -154,7 +210,8 @@ pub fn build_rocket(server_state: ServerState, config: AWConfig) -> rocket::Rock
                 // custom static files
                 root_dark,
                 root_logo,
-                root_manifest
+                root_manifest,
+                api_index,
             ],
         )
         .mount("/api/0/info", routes![server_info])
