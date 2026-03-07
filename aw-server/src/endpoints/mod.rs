@@ -61,7 +61,7 @@ fn root_index(state: &State<ServerState>) -> Option<(ContentType, Vec<u8>)> {
     get_file("index.html".into(), state)
 }
 
-#[get("/api/")]
+#[get("/api")]
 fn api_index() -> (ContentType, String) {
     (
         ContentType::HTML,
